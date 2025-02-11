@@ -22,6 +22,7 @@ class DocParser:
             aws_secret_access_key=SECRET_KEY,
         )
         self.collected_table_text = []
+        self.constructed_lines = []
 
     def extract_content(self, path):
         print("Content extraction started")
@@ -73,9 +74,9 @@ class DocParser:
             ],  # This is valid only with analyze_document
         )
 
-        image_table_data = self.extract_table_data(response)
-        image_check_boxes = self.extract_checkboxes(response)
-        image_lines = self.extract_lines(response)
+        image_table_data = self.get_table_data(response)
+        image_check_boxes = self.get_key_value_pairs(response)
+        image_lines = self.get_lines(response)
 
         image_data = image_lines + "\n" + image_check_boxes + "\n" + image_table_data
 
@@ -100,7 +101,7 @@ class DocParser:
                             text += word["Text"] + " "
         return text.strip()
 
-    def extract_table_data(self, response_data):
+    def get_table_data(self, response_data):
         # Create a map of blocks
         blocks_map = {block["Id"]: block for block in response_data["Blocks"]}
         table_data = ""
@@ -178,13 +179,20 @@ class DocParser:
 
         return current_table_data
 
-    def extract_lines(self, response_data):
+    def get_lines(self, response_data):
         lines = ""
 
         for data in response_data["Blocks"]:
             if data["BlockType"] == "LINE":
                 text = data["Text"]
-                if text not in self.collected_table_text:
+                text_in_constructed_lines = [
+                    line for line in self.constructed_lines if text.startswith(line)
+                ]
+
+                if (
+                    text not in self.collected_table_text
+                    and len(text_in_constructed_lines) == 0
+                ):
                     x = round(data["Geometry"]["BoundingBox"]["Left"], 2)
                     y = round(data["Geometry"]["BoundingBox"]["Top"], 2)
                     lines += f"{text} [Axis(x,y): ({x},{y})]\n"
@@ -194,21 +202,71 @@ class DocParser:
 
         return lines
 
-    def extract_checkboxes(self, response_data):
-        checkboxes = ""
+    def get_key_value_pairs(self, response_data):
+        key_value_pairs = ""
 
         for data in response_data["Blocks"]:
-            if data["BlockType"] == "SELECTION_ELEMENT":
-                x = round(data["Geometry"]["BoundingBox"]["Left"], 2)
-                y = round(data["Geometry"]["BoundingBox"]["Top"], 2)
-                check_boxes += (
-                    f"Check Box: {data['SelectionStatus']} [Axis(x,y): ({x},{y})]\n"
-                )
+            value = None
+            key = None
+            if data["BlockType"] == "KEY_VALUE_SET" and data.get(
+                "EntityTypes", None
+            ) == ["KEY"]:
+                relationships = data["Relationships"]
+                for relation in relationships:
+                    if relation["Type"] == "VALUE":
+                        value_id = relation["Ids"][0]
+                        value = self.get_value(response_data["Blocks"], value_id)
 
-        if checkboxes != "":
-            checkboxes = "--- Extracted Checkboxes ---\n" + checkboxes
+                    elif relation["Type"] == "CHILD":
+                        key = self.get_key(response_data["Blocks"], relation["Ids"])
 
-        return checkboxes
+                    if key and value:
+                        key_value_pairs += f"Key: {key} | Value: {value}\n"
+                        self.constructed_lines.append(key)
+
+        if key_value_pairs != "":
+            return "\n--- Key Value Pairs ---\n" + key_value_pairs
+
+        return key_value_pairs
+
+    def get_value(self, blocks, value_id):
+        for data in blocks:
+            if data["Id"] == value_id:
+                if data.get("EntityTypes", None) == ["VALUE"]:
+                    relationships = data.get("Relationships", None)
+
+                    if relationships:
+                        values = []
+                        for relationship_id in relationships[0]["Ids"]:
+                            retrieved_value = self.get_value(blocks, relationship_id)
+                            if retrieved_value == None:
+                                return None
+                            values.append(retrieved_value)
+
+                        return " ".join(values)
+                    return None
+
+                else:
+                    if data["BlockType"] == "SELECTION_ELEMENT":
+                        return data["SelectionStatus"]
+
+                    return None
+
+        return None
+
+    def get_key(self, blocks, key_ids):
+        key_value = []
+        for key_id in key_ids:
+            for data in blocks:
+                if data["Id"] == key_id:
+                    if data["BlockType"] == "WORD":
+                        key_value.append(data["Text"])
+                    else:
+                        raise TypeError(
+                            "Data Block type is not a WORD. Error in DocParser.get_key() function"
+                        )
+
+        return " ".join(key_value)
 
 
 if __name__ == "__main__":

@@ -23,7 +23,7 @@ class PDFManager:
 
         image_paths = []
         for i, page in enumerate(pages, start=1):
-            image_name = f"{self.output_folder}\{file_name}_{i}.png"
+            image_name = f"{self.output_folder}\{i}_{file_name}.png"
             page.save(image_name, "PNG")
             image_paths.append(image_name)
 

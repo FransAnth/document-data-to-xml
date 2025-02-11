@@ -3,3 +3,7 @@ venv/
 
 __pycache__/
 *.pyc
+
+xml_output/
+images/output/
+files/

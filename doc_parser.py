@@ -8,7 +8,7 @@ start_time = time.time()
 doc_parser = DocParser()
 chatbot = OpenAiQuery()
 
-file_path = "files\complex_invoice3.pdf"
+file_path = "files\Balbec Bid (1_24_2025).docx"
 parsed_data = doc_parser.extract_content(path=file_path)
 
 for data in parsed_data:
